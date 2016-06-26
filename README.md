@@ -7,13 +7,20 @@ A simple bash script to link/ unlink nginx webserver config files from sites ava
 * nginx link/unlinker
 * 1.0
 
-### How do I get set up? ###
+### How do I set it up? ###
 
-* Just mv/copy it to /usr/bin/nginxctl to make it usable
+* Just mv|copy|link it to /usr/bin/nginxctl to make it usable
 
-### How to use ###
+### How to use? ###
 
-nginxctl [ENTER]                        # lists args and possible servernames
-nginxctl en servername [ENTER]          # link servername into sites-enabled
-nginxctl dis servername [ENTER]         # unlink servername from sites-enabled
+* nginxctl [ENTER]													# lists args and existing servernames
+* nginxctl start servername [ENTER]					# link servername into sites-enabled
+* nginxctl stop  servername [ENTER]					# unlink servername from sites-enabled
+* nginxctl reload  [ENTER]									# reload nginx server configs
+* nginxctl restart [ENTER]									# restart nginx main server
+* nginxctl create  servername 1 1 1[ENTER]	# create servername config (php log index)
+																						# first param {0|1} add php-fpm stuff
+																						# secnd param {0|1} add logfile stuff
+																						# third param {0|1} add index file into webroot
+* nginxctl destroy servername [ENTER]				# delete a server (remove all files!)
 
