@@ -4,6 +4,7 @@
 # nginx pathes
 #
 
+WEBROOT="/var/www/"
 ENABLED="/etc/nginx/sites-enabled/"
 AVAILABLE="/etc/nginx/sites-available/"
 
@@ -11,17 +12,22 @@ AVAILABLE="/etc/nginx/sites-available/"
 # variables
 #
 
+PHP=0
+LOG=0
+INDEX=0
+RELOAD=0
 RESTART=0
 NAME=""
 CMD=""
 VALID=()
+RUNNING=()
 
 #
 # Helper functions
 #
 
 # Function for validating Arguments
-die() {
+function die() {
   echo >&2 "$@"
   exit 1
 }
@@ -29,7 +35,7 @@ die() {
 # Returns key if element exists in array
 # ARG1 = needle
 # ARG2 = haystack
-search() {
+function search() {
     local i=0;
     for str in "${@:2}"; do
         if [ "$str" = "$1" ]; then
@@ -54,20 +60,123 @@ function lastcmd() {
   fi
 }
 
-usage() {
-  echo "Usage: $0 {en|dis} <name>"
-  echo "possible names:"
-  for file in ${AVAILABLE}*
-  do
-    file=${file%*/}
-    echo ${file##*/}
-  done
+function create() {
+  NAME=$1
+  PHP=$2
+  LOG=$3
+  INDEX=$4
+  FILE="${AVAILABLE}${NAME}"
+  [ ! -f $FILE ] || die "server $NAME already exists, aborted!"
+  # create log folder
+  echo -n -e "create logfolder /var/log/nginx/${NAME} \t\t"
+  mkdir /var/log/nginx/${NAME}
+  lastcmd $?
+  # create folder in webroot
+  echo -n -e "create webroot ${WEBROOT}${NAME} \t\t\t"
+  mkdir ${WEBROOT}${NAME}
+  lastcmd $?
+  # create config file in nginx sites available
+  echo -n "create "
+  if [ $PHP -gt 0 ]; then echo -n "php5-fpm "; fi
+  echo -n -e "server config \t\t"
+  if [ $PHP -gt 0 ]; then echo -n -e "\t"; else echo -n -e "\t\t"; fi
+  # create config file:
+  echo "# configfile for server: $NAME" >> $FILE
+  echo "" >> $FILE
+  echo "server {" >> $FILE
+  echo "" >> $FILE
+  echo "  #listen   80; ## listen for ipv4; this line is default and implied" >> $FILE
+  echo "  #listen   [::]:80 default_server ipv6only=on; ## listen for ipv6" >> $FILE
+  echo "" >> $FILE
+  echo "  root /var/www/$NAME;" >> $FILE
+  echo -n "  index index.html index.htm" >> $FILE
+  if [ $PHP -gt 0 ]; then echo -n " index.php" >> $FILE; fi
+  echo ";" >> $FILE
+  echo "" >> $FILE
+  echo "  # Make site accessible from http://$NAME/" >> $FILE
+  echo "  server_name $NAME;" >> $FILE
+  if [ $PHP -gt 0 ]; then
+    echo "" >> $FILE
+    echo "  location ~* \.php$ {" >> $FILE
+    echo "    include fastcgi_params;" >> $FILE
+    echo "    fastcgi_pass php;" >> $FILE
+    echo "    fastcgi_index index.php;" >> $FILE
+    echo "  }" >> $FILE
+  fi
+  echo "" >> $FILE
+  if [ $LOG -gt 0 ]; then
+    echo "  error_log /var/log/nginx/${NAME}/error.log error;" >> $FILE
+    echo "" >> $FILE
+  fi
+  echo "}" >> $FILE
+  echo "" >> $FILE
+  echo "# end of file" >> $FILE
+  lastcmd $?
+  
+  if [ $INDEX -gt 0 ]; then
+    if [ $PHP -gt 0 ]; then
+      FILENAME="index.php"
+      INDEXFILE=${WEBROOT}${NAME}/${FILENAME}
+      echo -n -e "create file ${FILENAME} in ${WEBROOT}${NAME}/ \t"
+      echo '<!DOCTYPE html>' >> $INDEXFILE
+      echo '<html lang="en">' >> $INDEXFILE
+      echo '<head>' >> $INDEXFILE
+      echo -n '  <title>' >> $INDEXFILE
+      echo -n ${NAME} >> $INDEXFILE
+      echo '</title>' >> $INDEXFILE
+      echo '  <meta http-equiv="content-type" content="text/html; charset=UTF-8">' >> $INDEXFILE
+      echo '  <meta name="viewport" content="width=device-width, minimum-scale=1.0, maximum-scale=1.0" />' >> $INDEXFILE
+      echo '</head>' >> $INDEXFILE
+      echo '<body>' >> $INDEXFILE
+      echo '<?php phpinfo(); ?>' >> $INDEXFILE
+      echo '</body>' >> $INDEXFILE
+      echo '</html>' >> $INDEXFILE
+      lastcmd $?
+    else
+      FILENAME="index.html"
+      INDEXFILE=${WEBROOT}${NAME}/${FILENAME}
+      echo -n -e "create file ${FILENAME} in ${WEBROOT}${NAME}/ \t"
+      echo '<!DOCTYPE html>' >> $INDEXFILE
+      echo '<html lang="en">' >> $INDEXFILE
+      echo '<head>' >> $INDEXFILE
+      echo "  <title>${NAME}</title>" >> $INDEXFILE
+      echo '  <meta http-equiv="content-type" content="text/html; charset=UTF-8">' >> $INDEXFILE
+      echo '  <meta name="viewport" content="width=device-width, minimum-scale=1.0, maximum-scale=1.0" />' >> $INDEXFILE
+      echo '</head>' >> $INDEXFILE
+      echo '<body>' >> $INDEXFILE
+      echo "<h1>${NAME} Main page</h1>" >> $INDEXFILE
+      echo "<p>Place some Text in here. Found me here: ${INDEXFILE}</p>" >> $INDEXFILE
+      echo '</body>' >> $INDEXFILE
+      echo '</html>' >> $INDEXFILE
+      lastcmd $?
+    fi
+  fi
+  echo -n ""
+}
+
+
+function usage() {
+  SCRIPT=$(basename $0)
+  echo -e -n "\e[34mUsage\e[0m: "
+  echo -e "$SCRIPT {start|stop|reload|restart|create|destroy} <name>"
+  echo -e "  $SCRIPT start \t servername \t link servername into sites-enabled"
+  echo -e "  $SCRIPT stop \t servername \t unlink servername from sites-enabled"
+  echo -e "  $SCRIPT reload \t \t \t reload nginx server configs"
+  echo -e "  $SCRIPT restart \t \t \t restart nginx main server"
+  echo -e "  $SCRIPT create \t servername \t create virtualhost servername into sites-avalable"
+  echo -e "  $SCRIPT destroy \t servername \t remove servername from sites-available (!!! remove also webroot and logs !!!)"
 }
 
 
 #
 # Main function
 #
+
+# is nginx installed
+[ ! `/usr/bin/which nginx >/dev/null` ] || die "Nginx command not found"
+
+# is nginx webroot valid
+[ ! `test -d $WEBROOT` ] || die "Nginx webroot ($WEBROOT) not found"
 
 # collect all server names from AVAILABLE path in VALID
 for file in ${AVAILABLE}*
@@ -76,47 +185,185 @@ do
   VALID+=(${file##*/})
 done
 
+# collect all server names from ENABLED path in RUNNING
+for file in ${ENABLED}*
+do
+  file=${file%*/}
+  RUNNING+=(${file##*/})
+done 
+
 if [ $1 ]; then
   if [ $2 ]; then
     # name and commmand are given
     CMD=$1
     NAME=$2
-    if [ "$CMD" == "en" ]; then
+    
+    # enable virtualhosts
+    if [ "$CMD" == "start" ]; then
+      if [ "$NAME" == "all" ]; then
+        # enable all servers
+        for file in ${AVAILABLE}*
+        do
+          filename=${file%*/}
+	  filename=${filename##*/}
+          index=`search "$filename" "${RUNNING[@]}"`
+          if [ ! $index == -1 ]; then
+            #echo -e "skip \t $filename"
+            continue
+          else
+            #echo -e "enable \t $filename"
+            DEST="${ENABLED}${filename}"
+            TARG="${AVAILABLE}${filename}"
+            echo -n -e "enable server \t $filename \t\t\t"
+            ln -s $TARG $DEST
+            lastcmd $?
+            RELOAD=1
+          fi
+        done
+      else
+        # enable one server by name
+        index=`search "$NAME" "${VALID[@]}"`
+        [ ! $index == -1 ] || die "$NAME not found in nginx sites-available"
+        DEST="${ENABLED}${NAME}"
+        TARG="${AVAILABLE}${NAME}"
+        [ ! -f $DEST ] || die "server already active"
+        echo -n -e "enable server \t $NAME \t\t\t"
+        ln -s $TARG $DEST
+        lastcmd $?
+	RELOAD=1
+      fi
+    fi
+
+    # disable virtualhosts
+    if [ "$CMD" == "stop" ]; then
+      if [ "$NAME" == "all" ]; then
+        # disable all servers
+        for file in ${AVAILABLE}*
+        do
+          filename=${file%*/}
+          filename=${filename##*/}
+          index=`search "$filename" "${RUNNING[@]}"`
+          if [ $index == -1 ]; then
+            continue
+          else
+            DEST="${ENABLED}${filename}"
+            echo -n -e "disable server \t $filename \t\t\t"
+            unlink $DEST
+            lastcmd $?
+            RELOAD=1
+          fi
+        done
+      else
+        # enable one by name
+        index=`search "$NAME" "${VALID[@]}"`
+        [ ! $index == -1 ] || die "$NAME not found in nginx sites-enabled"
+        DEST="${ENABLED}${NAME}"
+        [ -f $DEST ] || die "server already disabled"
+        echo -n -e "dissable server \t $NAME \t\t"
+        unlink $DEST
+        lastcmd $?
+        RELOAD=1
+      fi
+    fi
+
+    # create a virtualhost
+    if [ "$CMD" == "create" ]; then
       index=`search "$NAME" "${VALID[@]}"`
-      [ ! $index == -1 ] || die "$NAME not found in ngingx path"
-      DEST="${ENABLED}${NAME}"
-      TARG="${AVAILABLE}${NAME}"
-      [ ! -f $DEST ] || die "server already active"
-      echo -n "enable server $NAME: "
-      ln -s $TARG $DEST
+      [ $index == -1 ] || die "$NAME already found in nginx sites-available"
+      if [ "$3" == "" ] || [ "$3" == "0" ]; then PHP=0; else PHP=1; fi
+      if [ "$4" == "" ] || [ "$4" == "0" ]; then LOG=0; else LOG=1; fi
+      if [ "$5" == "" ] || [ "$5" == "0" ]; then INDEX=0; else INDEX=1; fi
+      echo "create server $NAME php=$PHP log=$LOG index=$INDEX: "
+      create $NAME $PHP $LOG $INDEX
+      RESTART=1
+    fi
+
+    # destroy a virtualhost
+    if [ "$CMD" == "destroy" ]; then
+      index=`search "$NAME" "${VALID[@]}"`
+      [ ! $index == -1 ] || die "$NAME not found in nginx sites-available"
+      index=`search "$NAME" "${RUNNING[@]}"`
+      if [ ! $index == -1 ]; then
+        echo -n "$NAME is runnning, disable virtualhost: "
+        unlink ${ENABLED}${NAME} 
+        lastcmd $?
+      fi
+      echo -n -e "remove server $NAME webroot \t\t\t"
+      rm -rf ${WEBROOT}${NAME}
+      lastcmd $?
+      echo -n -e "remove $NAME from sites-available \t\t"
+      rm -rf ${AVAILABLE}${NAME}
+      lastcmd $?
+      echo -n -e "remove server $NAME log Folder \t\t"
+      rm -rf /var/log/nginx/${NAME}
       lastcmd $?
       RESTART=1
     fi
-    if [ "$CMD" == "dis" ]; then
-      index=`search "$NAME" "${VALID[@]}"`
-      [ ! $index == -1 ] || die "$NAME not found in ngingx path"
-      DEST="${ENABLED}${NAME}"
-      [ -f $DEST ] || die "server already disabled"
-      echo -n "dissable server $NAME: "
-      unlink $DEST
-      lastcmd $?
-      RESTART=1
-    fi
+
   else
     # only one argument is given
-    echo "Missing name after command. Possible names:"
-    #echo ${VALID[@]}
-    printf '%s\n' "${VALID[@]}"  
+    SINGLE=0
+    # Reload config files
+    if [ "$1" == "reload" ]; then
+      RELOAD=1
+      SINGLE=1
+    fi
+    # Restart server
+    if [ "$1" == "restart" ]; then
+      RESTART=1
+      SINGLE=1
+    fi
+    if [ ! $SINGLE -gt 0 ]; then
+      echo "Missing servername after command."
+      echo -e "existing servers (\e[31moffline\e[0m/\e[32monline *\e[0m):"
+      for file in ${AVAILABLE}*
+      do
+        file=${file%*/}
+        file=${file##*/}
+        index=`search "$file" "${RUNNING[@]}"`
+        if [ ! $index == -1 ]; then
+          echo -e "\e[32m${file##*/} *\e[0m"
+        else
+          echo -e "\e[31m${file##*/}\e[0m"
+        fi
+      done
+    fi
   fi
 else
   # no argument
   usage
+  echo -e "already xisting servers (\e[31moffline\e[0m/\e[32monline *\e[0m):"
+  for file in ${AVAILABLE}*
+  do
+    filename=${file%*/}
+    filename=${filename##*/}
+    # echo -n "${ENABLED}${filename} "
+    index=`search "$filename" "${RUNNING[@]}"`
+    if [ $index == -1 ]; then
+    #if [ `test -e ${ENABLED}${filename}` ]; then
+      # not running
+      echo -e "  \e[31m${filename##*/}\e[0m"
+    else
+      # running
+      echo -e "  \e[32m${filename##*/} *\e[0m"
+    fi
+  done
 fi
 
-# restart service
-if [ "$RESTART" -gt 0 ]; then
-  echo -n "Reload nginx: "
+# managing nginx service
+if [ $RELOAD -gt 0 ]; then
+  echo -n -e "Reload nginx \t\t\t\t\t"
   service nginx reload &> /dev/null
+  lastcmd $?
+fi
+if [ $RESTART -gt 0 ]; then
+  if [ $PHP -gt 0 ]; then 
+    echo -n -e "Restart php5-fpm \t\t\t\t\t"
+    service php5-fpm restart &> /dev/null
+    lastcmd $?
+  fi
+  echo -n -e "Restart nginx \t\t\t\t\t"
+  service nginx restart &> /dev/null
   lastcmd $?
 fi
 
