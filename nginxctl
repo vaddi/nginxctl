@@ -1,0 +1,125 @@
+#!/bin/bash
+
+#
+# nginx pathes
+#
+
+ENABLED="/etc/nginx/sites-enabled/"
+AVAILABLE="/etc/nginx/sites-available/"
+
+#
+# variables
+#
+
+RESTART=0
+NAME=""
+CMD=""
+VALID=()
+
+#
+# Helper functions
+#
+
+# Function for validating Arguments
+die() {
+  echo >&2 "$@"
+  exit 1
+}
+
+# Returns key if element exists in array
+# ARG1 = needle
+# ARG2 = haystack
+search() {
+    local i=0;
+    for str in "${@:2}"; do
+        if [ "$str" = "$1" ]; then
+            echo $i
+            return
+        else
+            ((i++))
+        fi
+    done
+    echo -1
+}
+
+# Colorized status output
+OK="\033[1;32mOK\e[0m"
+FAIL="\033[0;31mFAIL\e[0m"
+
+function lastcmd() {
+  if [ $1 -eq 0 ]; then
+    echo -e "$OK"
+  else
+    echo -e "$FAIL"
+  fi
+}
+
+usage() {
+  echo "Usage: $0 {en|dis} <name>"
+  echo "possible names:"
+  for file in ${AVAILABLE}*
+  do
+    file=${file%*/}
+    echo ${file##*/}
+  done
+}
+
+
+#
+# Main function
+#
+
+# collect all server names from AVAILABLE path in VALID
+for file in ${AVAILABLE}*
+do
+  file=${file%*/}
+  VALID+=(${file##*/})
+done
+
+if [ $1 ]; then
+  if [ $2 ]; then
+    # name and commmand are given
+    CMD=$1
+    NAME=$2
+    if [ "$CMD" == "en" ]; then
+      index=`search "$NAME" "${VALID[@]}"`
+      [ ! $index == -1 ] || die "$NAME not found in ngingx path"
+      DEST="${ENABLED}${NAME}"
+      TARG="${AVAILABLE}${NAME}"
+      [ ! -f $DEST ] || die "server already active"
+      echo -n "enable server $NAME: "
+      ln -s $TARG $DEST
+      lastcmd $?
+      RESTART=1
+    fi
+    if [ "$CMD" == "dis" ]; then
+      index=`search "$NAME" "${VALID[@]}"`
+      [ ! $index == -1 ] || die "$NAME not found in ngingx path"
+      DEST="${ENABLED}${NAME}"
+      [ -f $DEST ] || die "server already disabled"
+      echo -n "dissable server $NAME: "
+      unlink $DEST
+      lastcmd $?
+      RESTART=1
+    fi
+  else
+    # only one argument is given
+    echo "Missing name after command. Possible names:"
+    #echo ${VALID[@]}
+    printf '%s\n' "${VALID[@]}"  
+  fi
+else
+  # no argument
+  usage
+fi
+
+# restart service
+if [ "$RESTART" -gt 0 ]; then
+  echo -n "Reload nginx: "
+  service nginx reload &> /dev/null
+  lastcmd $?
+fi
+
+exit 0
+
+# end of file
