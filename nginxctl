@@ -67,20 +67,28 @@ function create() {
   INDEX=$4
   FILE="${AVAILABLE}${NAME}"
   [ ! -f $FILE ] || die "server $NAME already exists, aborted!"
-  # create log folder
-  echo -n -e "create logfolder /var/log/nginx/${NAME} \t\t"
-  mkdir /var/log/nginx/${NAME}
-  lastcmd $?
-  # create folder in webroot
+  if [ $LOG -gt 0 ]; then
+    # create log folder
+    echo -n -e "create logfolder /var/log/nginx/${NAME} \t\t"
+    mkdir /var/log/nginx/${NAME} 
+    lastcmd $?
+#    echo -n -e "`- set permissions for logfolder: \t\t\t"
+#    /bin/chown -R www-data:www-data /var/log/nginx/${NAME}
+#    lastcmd $?
+  fi
+  # create server-webroot in main webroot folder
   echo -n -e "create webroot ${WEBROOT}${NAME} \t\t\t"
   mkdir ${WEBROOT}${NAME}
   lastcmd $?
+#  echo -n -e "`- set permissions for webroot: \t\t\t"
+#  /bin/chown -R www-data:www-data ${WEBROOT}${NAME}
+#  lastcmd $?
   # create config file in nginx sites available
   echo -n "create "
   if [ $PHP -gt 0 ]; then echo -n "php5-fpm "; fi
   echo -n -e "server config \t\t"
   if [ $PHP -gt 0 ]; then echo -n -e "\t"; else echo -n -e "\t\t"; fi
-  # create config file:
+  # START CONFIGFILE
   echo "# configfile for server: $NAME" >> $FILE
   echo "" >> $FILE
   echo "server {" >> $FILE
@@ -94,7 +102,8 @@ function create() {
   echo ";" >> $FILE
   echo "" >> $FILE
   echo "  # Make site accessible from http://$NAME/" >> $FILE
-  echo "  server_name $NAME;" >> $FILE
+#  echo "  server_name $NAME.$(hostname -f);" >> $FILE
+  echo "  server_name $NAME.;" >> $FILE
   if [ $PHP -gt 0 ]; then
     echo "" >> $FILE
     echo "  location ~* \.php$ {" >> $FILE
@@ -104,6 +113,10 @@ function create() {
     echo "  }" >> $FILE
   fi
   echo "" >> $FILE
+  echo "  location / {" >> $FILE
+  echo "      try_files $uri $uri/ =404;" >> $FILE
+  echo "  }" >> $FILE
+  echo "" >> $FILE
   if [ $LOG -gt 0 ]; then
     echo "  error_log /var/log/nginx/${NAME}/error.log error;" >> $FILE
     echo "" >> $FILE
@@ -111,6 +124,7 @@ function create() {
   echo "}" >> $FILE
   echo "" >> $FILE
   echo "# end of file" >> $FILE
+  # END OF CONFIGFILE
   lastcmd $?
   
   if [ $INDEX -gt 0 ]; then
@@ -157,7 +171,7 @@ function create() {
 
 function usage() {
   SCRIPT=$(basename $0)
-  echo -e -n "\e[34mUsage\e[0m: "
+  echo -e "\e[34mUsage\e[0m: "
   echo -e "$SCRIPT {start|stop|reload|restart|create|destroy} <name>"
   echo -e "  $SCRIPT start \t servername \t link servername into sites-enabled"
   echo -e "  $SCRIPT stop \t servername \t unlink servername from sites-enabled"
@@ -315,7 +329,8 @@ if [ $1 ]; then
     fi
     if [ ! $SINGLE -gt 0 ]; then
       echo "Missing servername after command."
-      echo -e "existing servers (\e[31moffline\e[0m/\e[32monline *\e[0m):"
+      echo ""
+      echo -e "List of already existing servers (\e[31moffline\e[0m/\e[32monline *\e[0m):"
       for file in ${AVAILABLE}*
       do
         file=${file%*/}
@@ -327,12 +342,14 @@ if [ $1 ]; then
           echo -e "\e[31m${file##*/}\e[0m"
         fi
       done
+      echo ""
     fi
   fi
 else
   # no argument
   usage
-  echo -e "already xisting servers (\e[31moffline\e[0m/\e[32monline *\e[0m):"
+  echo ""
+  echo -e "List of already existing servers (\e[31moffline\e[0m/\e[32monline *\e[0m):"
   for file in ${AVAILABLE}*
   do
     filename=${file%*/}
@@ -348,6 +365,7 @@ else
       echo -e "  \e[32m${filename##*/} *\e[0m"
     fi
   done
+  echo ""
 fi
 
 # managing nginx service
